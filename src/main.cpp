@@ -108,9 +108,9 @@ void SensorDetect() {
   }
 
   if (currentSensorState) {
-    Myservo.write(90);
+    Myservo.writeMicroseconds(1500); // Move servo to 180 degrees (fully open)
   } else {
-    Myservo.write(0);
+    Myservo.writeMicroseconds(1000); // Move servo to 0 degrees (fully closed)
   }
 }
 
