@@ -2,33 +2,37 @@
 #include <Servo.h>
 #include <WiFi.h>
 #include <PubSubClient.h>
+#include <HTTPClient.h>
+#include <time.h>
 
 Servo Myservo;
+
+// pin definition
+int ServoPin = 26; // Define the pin for the servo motor
 int Detectsensor = 17; // Define the pin for the detection sensor
+
 void SensorDetect();
 void sendSensorData(bool state);
-unsigned long servoHoldUntil = 0;
-const unsigned long SERVO_HOLD_MS = 5000;
-bool lastSensorState = false; // Track previous sensor state for edge detection
-
 
 // WIFI config
-const char *ssid = "Wokwi-GUEST";
-const char *password = "";
+const char *ssid = "Redmi Note 14";
+const char *password = "donpine000";
+// const char *ssid = "iPhone (7)";
+// const char *password = "245566677)";
 WiFiClient wifiClient;
 // MQTT client config
 const char *mqttServer = "mqtt.netpie.io";
 const int mqttPort = 1883;
-const char *mqttClientId = ""; // replace with your client ID
-const char *mqttUser = ""; // replace with your MQTT username
-const char *mqttPassword = ""; // replace with your MQTT password
+const char *mqttClientId = "8ad22b92-426b-4dc0-a575-2d36aeedee39";
+const char *mqttUser = "m2EKkWEMDBuqkHW3E6WkhjTSUkjwQ8hi";
+const char *mqttPassword = "8mvBLFxZRQAv5FK2pTwKE2aJ76Px9G6c";
 const char *topic_pub = "@msg/lab_ict_kps/sensor_data/value"; // topic to publish
+const char *topic_sub = "@msg/lab_ict_kps/flush/value"; // topic to subscribe
 const char *data_pub = "@shadow/data/update"; // topic to publish
 PubSubClient mqttClient(wifiClient);
 // some variables buffer
 String publishMessage;
-// pin definition
-
+bool isGettingCommand;
 
 void setup_wifi()
 {
@@ -65,7 +69,8 @@ void reconnectMQTT()
     {
       Serial.println("---> MQTT Broker connected...");
       // subscribe here after connected
-      // ในตัวอย่างของฝั่งส่งไม่มีการ subscribe topic ใด
+      mqttClient.subscribe(topic_sub);
+      
     }
     else
     {
@@ -77,52 +82,121 @@ void reconnectMQTT()
   }
 }
 
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  String message, publishMessage;
+  
+  Serial.print("Message arrived [");
+  Serial.print(topic);
+  Serial.print("] ");
+
+  for (unsigned int i = 0; i < length; i++) {
+    message += (char)payload[i];
+  }
+  Serial.println(message);
+
+  if (message.indexOf("\"isFlushing\":1")) {
+    isGettingCommand = true;
+  } 
+  
+}
+
+void sendToFirebase() {
+  HTTPClient http;
+  String url = "https://toliet-project-default-rtdb.asia-southeast1.firebasedatabase.app/sensor_data.json"; // URL ของ Firebase Realtime Database (ปรับให้ตรงกับโครงสร้างของคุณ)
+
+  // สร้าง timestamp
+  time_t now = time(nullptr);
+  struct tm* timeinfo = localtime(&now);
+  char timestamp[25];
+  strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%S", timeinfo);
+
+  // สร้าง entry ID แบบสุ่มหรือใช้ millis()
+  String entryId = "entry" + String(millis());
+
+  // สร้าง payload JSON
+  String payload = "{ \"" + entryId + "\": {";
+  payload += "\"timestamp\": \"" + String(timestamp) + "\"";
+  payload += "} }";
+
+  http.begin(url);
+  http.addHeader("Content-Type", "application/json");
+  int httpResponseCode = http.PATCH(payload); // ใช้ PATCH เพื่อ merge entry ใหม่
+
+  if (httpResponseCode > 0) {
+    Serial.println("Firebase response: " + http.getString());
+  } else {
+    Serial.println("Error sending to Firebase. Code: " + String(httpResponseCode));
+  }
+
+  http.end();
+}
 
 void setup() {
   Serial.begin(115200);
-  //setup_wifi();
-  //mqttClient.setServer(mqttServer, mqttPort);
-  Myservo.attach(26); 
+  setup_wifi();
+  mqttClient.setServer(mqttServer, mqttPort);
+  mqttClient.setCallback(mqttCallback);
+  // time setup
+  configTime(7 * 3600, 0, "pool.ntp.org"); // GMT+7 สำหรับประเทศไทย
+  Serial.println("Waiting for NTP time sync...");
+  while (time(nullptr) < 100000) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nTime synced!");
+  Myservo.attach(ServoPin);
   pinMode(Detectsensor, INPUT);
+  isGettingCommand = false;
   delay(1000); // delay to let initialization ready  
 }
 
 void loop() {
-  // if (!mqttClient.connected())
-  // {
-  //   reconnectMQTT();
-  // } 
-  // mqttClient.loop();
-  
-  SensorDetect(); // Call the function to check the sensor and move the servo accordingly
+  if (!mqttClient.connected())
+  {
+    reconnectMQTT();
+  } 
+  mqttClient.loop();
+  SensorDetect();
 }
 
-
 void SensorDetect() {
-  bool currentSensorState = digitalRead(Detectsensor) == HIGH;
-
-  // Edge detection: check if state changed
-  if (currentSensorState != lastSensorState) {
-    lastSensorState = currentSensorState;
-    sendSensorData(currentSensorState); // Send MQTT only on state change
+  bool currentSensorState ;
+  if(isGettingCommand){
+    isGettingCommand = false; // i dont know why
+    currentSensorState = false;
+  }else{
+    currentSensorState = digitalRead(Detectsensor); 
   }
-
+  sendSensorData(currentSensorState);
   if (currentSensorState) {
-    Myservo.writeMicroseconds(1500); // Move servo to 180 degrees (fully open)
+   
+    Myservo.write(90);
+    delay(2000); // เวลาที่ใช้จับเซนเซอร์ตรวจจับ
+    
   } else {
-    Myservo.writeMicroseconds(1000); // Move servo to 0 degrees (fully closed)
+    sendToFirebase();
+    // Myservo.write(90); 
+    // delay(4000); // เวลาที่ใช้หมุนครั้งแรก
+
+    Myservo.write(180);
+    delay(4000); // เวลาที่ใช้หมุนครั้งที่สองก่อนหยุด
+
+    Myservo.write(0);
+    delay(4000); // เวลาที่ใช้หมุนครั้งที่สองก่อนหยุด
+
+    
   }
 }
 
 void sendSensorData(bool state) {
-  String status = state ? "DETECTED" : "CLEAR";
-  publishMessage = "{\"sensor\":" + String(state ? 1 : 0) + ",\"status\":\"" + status + "\"}";
-  
+  publishMessage = "{\"data\":";
+  publishMessage += "{\"isFlushing\":" + String(state ? 0 : 1);
+  publishMessage += "}";
+  publishMessage += "}";
   mqttClient.publish(topic_pub, publishMessage.c_str());
   mqttClient.publish(data_pub, publishMessage.c_str());
   
   Serial.print("Sensor state changed to: ");
-  Serial.print(status);
   Serial.print(" | Published: ");
   Serial.println(publishMessage);
 }
