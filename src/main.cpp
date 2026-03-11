@@ -4,31 +4,30 @@
 #include <PubSubClient.h>
 
 Servo Myservo;
+
+// pin definition
+int ServoPin = 26; // Define the pin for the servo motor
 int Detectsensor = 17; // Define the pin for the detection sensor
+
 void SensorDetect();
 void sendSensorData(bool state);
-unsigned long servoHoldUntil = 0;
-const unsigned long SERVO_HOLD_MS = 5000;
-bool lastSensorState = false; // Track previous sensor state for edge detection
-
 
 // WIFI config
-const char *ssid = "Wokwi-GUEST";
-const char *password = "";
+const char *ssid = "Redmi Note 14";
+const char *password = "donpine000";
 WiFiClient wifiClient;
 // MQTT client config
 const char *mqttServer = "mqtt.netpie.io";
 const int mqttPort = 1883;
-const char *mqttClientId = ""; // replace with your client ID
-const char *mqttUser = ""; // replace with your MQTT username
-const char *mqttPassword = ""; // replace with your MQTT password
+const char *mqttClientId = "8ad22b92-426b-4dc0-a575-2d36aeedee39";
+const char *mqttUser = "m2EKkWEMDBuqkHW3E6WkhjTSUkjwQ8hi";
+const char *mqttPassword = "8mvBLFxZRQAv5FK2pTwKE2aJ76Px9G6c";
 const char *topic_pub = "@msg/lab_ict_kps/sensor_data/value"; // topic to publish
+const char *topic_sub = "@msg/lab_ict_kps/flush/value"; // topic to subscribe
 const char *data_pub = "@shadow/data/update"; // topic to publish
 PubSubClient mqttClient(wifiClient);
 // some variables buffer
 String publishMessage;
-// pin definition
-
 
 void setup_wifi()
 {
@@ -77,40 +76,44 @@ void reconnectMQTT()
   }
 }
 
-
 void setup() {
   Serial.begin(115200);
-  //setup_wifi();
-  //mqttClient.setServer(mqttServer, mqttPort);
-  Myservo.attach(26); 
+  setup_wifi();
+  mqttClient.setServer(mqttServer, mqttPort);
+  Myservo.attach(ServoPin);
   pinMode(Detectsensor, INPUT);
   delay(1000); // delay to let initialization ready  
 }
 
 void loop() {
-  // if (!mqttClient.connected())
-  // {
-  //   reconnectMQTT();
-  // } 
-  // mqttClient.loop();
-  
-  SensorDetect(); // Call the function to check the sensor and move the servo accordingly
+  if (!mqttClient.connected())
+  {
+    reconnectMQTT();
+  } 
+  mqttClient.loop();
+  SensorDetect();
 }
 
-
 void SensorDetect() {
-  bool currentSensorState = digitalRead(Detectsensor) == HIGH;
-
-  // Edge detection: check if state changed
-  if (currentSensorState != lastSensorState) {
-    lastSensorState = currentSensorState;
-    sendSensorData(currentSensorState); // Send MQTT only on state change
-  }
+  bool currentSensorState = digitalRead(Detectsensor);
 
   if (currentSensorState) {
-    Myservo.writeMicroseconds(1500); // Move servo to 180 degrees (fully open)
+    //sendSensorData(currentSensorState);
+    Myservo.write(90);
+    delay(2000); // เวลาที่ใช้จับเซนเซอร์ตรวจจับ
+    
   } else {
-    Myservo.writeMicroseconds(1000); // Move servo to 0 degrees (fully closed)
+
+
+
+    Myservo.write(90); 
+    delay(4000); // เวลาที่ใช้หมุนครั้งแรก
+
+    Myservo.write(180);
+    delay(4000); // เวลาที่ใช้หมุนครั้งที่สองก่อนหยุด
+
+    Myservo.write(180);
+    delay(4000); // เวลาที่ใช้หมุนครั้งที่สองก่อนหยุด
   }
 }
 
